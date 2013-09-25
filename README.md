@@ -5,6 +5,7 @@ DT-ICANSIM: A Delay-Tolerant Information-Centric Ad-Hoc Networking Simulation Mo
 
 
 UCLA Network Research Lab (NRL) simulation of DT-ICAN. http://nrlweb.cs.ucla.edu/
+Techincal report can be found here: http://nrlweb.cs.ucla.edu/publication/show/787
 
 This software works with QualNet and has been tested with QualNet 6.1. Users must have a valid license of QualNet to use it. 
 
