@@ -1,0 +1,5 @@
+include ../libraries/user_models/Makefile-common
+ADDON_OPTIONS   += $(USER_MODELS_OPTIONS)
+ADDON_SRCS      += $(USER_MODELS_SRCS)
+ADDON_INCLUDES  += $(USER_MODELS_INCLUDES)
+ADDON_LIBRARIES += $(USER_MODELS_LIBS)

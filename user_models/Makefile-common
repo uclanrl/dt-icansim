@@ -1,0 +1,25 @@
+USER_MODELS_OPTIONS = -DUSER_MODELS_LIB
+USER_MODELS_DIR = ../libraries/user_models/src
+
+USER_MODELS_SRCS = \
+$(USER_MODELS_DIR)/ican_common_packet.cpp \
+$(USER_MODELS_DIR)/ican_appmanager.cpp \
+$(USER_MODELS_DIR)/ican_app_dtnsubscriber.cpp \
+$(USER_MODELS_DIR)/ican_app_dtnpublisher.cpp \
+$(USER_MODELS_DIR)/ican_dtnmanager.cpp \
+$(USER_MODELS_DIR)/fragmentation.cpp \
+$(USER_MODELS_DIR)/ican_dtn_interestgenerator.cpp \
+$(USER_MODELS_DIR)/ican_dtn_cachesummarygenerator.cpp \
+$(USER_MODELS_DIR)/ican_dtn_interestmanager.cpp \
+$(USER_MODELS_DIR)/ican_dtn_objectqueue.cpp \
+$(USER_MODELS_DIR)/fragmentationpacketutil.cpp \
+$(USER_MODELS_DIR)/ican_dtn_requestmanager.cpp \
+$(USER_MODELS_DIR)/ican_dtn_requestgenerator.cpp \
+$(USER_MODELS_DIR)/ican_dtn_cachesummarystore.cpp \
+$(USER_MODELS_DIR)/icansim.cpp \
+$(USER_MODELS_DIR)/ican_common.cpp
+
+
+USER_MODELS_INCLUDES = \
+-I$(USER_MODELS_DIR)  \
+
