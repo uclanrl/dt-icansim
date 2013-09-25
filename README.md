@@ -24,6 +24,12 @@ Usage: the following assumes you already have a QualNet distribution.
         
 This software is free for research purpose. Academic publications that use DT-ICANSIM are requested to cite the following publication:
 
-Y. -T. Yu, J. Joy, M. Gerla, and M. Y. Sanadidi, DT-ICAN: A Delay-tolerant Information-Centric Ad-Hoc Network 
+@TECHREPORT{yu13dtican,
+     AUTHOR = "Yu-Ting Yu, Joshua Joy, Mario Gerla, and M. Y. Sanadidi",
+      TITLE = "DT-ICAN: A Delay-tolerant Information-Centric Ad-Hoc Network",
+INSTITUTION = "Department of Computer Science, University of California, Los Angeles",
+     NUMBER = "TR130017",
+       YEAR = "2013"
+} 
  
  
