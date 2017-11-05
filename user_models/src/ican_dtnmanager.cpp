@@ -1,6 +1,6 @@
 /*
 * Copyright (c) 2013,  Network Research Lab, University of California, Los Angeles
-* Coded by Yu-Ting Yu [yutingyu@cs.ucla.edu] / Joshua Joy [jjoy@cs.ucla.edu]
+* Coded by Yu-Ting Yu [yutingyu@cs.ucla.edu]
 * All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -46,12 +46,12 @@ CIcanDtnManager::CIcanDtnManager(Node* node, const NodeInput* nodeInput, DtnData
         node->nodeId,
         ANY_ADDRESS,
         nodeInput,
-        "TRANSMISSION-RANGE",
+        "DTN-TRANSMISSION-RANGE",
         &retVal,
         &m_txrange);
     if(retVal == FALSE)
     {
-	ReportError("TRANSMISSION-RANGE is missing");
+	ReportError("DTN-TRANSMISSION-RANGE is missing");
     }
 
 
@@ -183,6 +183,57 @@ CIcanDtnManager::CIcanDtnManager(Node* node, const NodeInput* nodeInput, DtnData
 	ReportError("BLOCK-SIZE is missing");
     }
 
+    IO_ReadBool(
+        node->nodeId,
+        ANY_ADDRESS,
+        nodeInput,
+        "ICAN-NC",
+        &retVal,
+        &m_enableNc);
+    if(retVal == FALSE)
+    {
+	ReportError("ICAN-NC is missing");    
+    }    
+
+    char buf[MAX_STRING_LENGTH];
+    NetworkCodingOption ncoption;
+        
+    IO_ReadString(
+        node->nodeId,
+        ANY_ADDRESS,
+        nodeInput,
+        "NETWORKCODING-OPTION",
+        &retVal,
+        buf);
+    if(retVal == FALSE)
+    {
+        ncoption = nc_fullobjectonly;
+    }
+    else
+    {
+        if(strcmp(buf, "SOURCE-ONLY")==0)
+        {
+            ncoption = nc_sourceonly;
+        }
+        else if(strcmp(buf, "MIXING")==0){
+            ncoption = nc_mixing;
+        }
+        else if(strcmp(buf, "FULL-OBJECT-ONLY")==0){
+            ncoption = nc_fullobjectonly;
+        }
+        else
+        {
+            char errorString[MAX_STRING_LENGTH];
+            sprintf(errorString,
+                    "Wrong ICAN-NC-OPTION configuration format! Acceptable options:\n"
+                    "PIT\n"
+                   );
+            ERROR_ReportError(errorString);
+        }
+    }
+
+    m_networkcoding = new NetworkCoding(node,this->m_pCacheSummaryStore, ncoption, BLOCKUNIT*sizeBlockInBlockUnit,this->m_pDtnDataStore);
+    
     m_fragmentation = new FragmentationManager(BLOCKUNIT*sizeBlockInBlockUnit,node, this->m_pCacheSummaryStore,this->m_pDtnDataStore);
     
 
@@ -202,6 +253,8 @@ CIcanDtnManager::CIcanDtnManager(Node* node, const NodeInput* nodeInput, DtnData
     }
     m_fragmentPacketUtil = new fragmentationpacketutil(dtnPktSize, BLOCKUNIT*sizeBlockInBlockUnit, node);
 
+    m_ncPacketUtil = new networkcodingpacketutil(dtnPktSize, (size_t) (BLOCKUNIT*sizeBlockInBlockUnit), node); 
+
     m_pHandshakeObjBuffer = new HandshakeObjectBuffer;
     m_pHandshakeDataWaitingState = new HandshakeWaitingState;
     m_pHandshakeAckWaitingState = new HandshakeWaitingState;
@@ -211,6 +264,9 @@ CIcanDtnManager::CIcanDtnManager(Node* node, const NodeInput* nodeInput, DtnData
 }
 
 CIcanDtnManager::~CIcanDtnManager(){
+
+    //delete any class instance created
+    //e.g. delete m_ncManager;
     
     delete m_pInterestRegistry;
     delete m_pCacheSummaryGen;
@@ -223,6 +279,10 @@ CIcanDtnManager::~CIcanDtnManager(){
         m_fragmentation = NULL;
     }
 
+    if(m_networkcoding){
+        delete this->m_networkcoding;
+        this->m_networkcoding = NULL;
+    }
 
     delete m_objectQueue;
     m_objectQueue = NULL;
@@ -241,6 +301,9 @@ CIcanDtnManager::~CIcanDtnManager(){
 
     delete m_pDataRequestGenerator;
     m_pDataRequestGenerator = NULL;
+
+    delete m_ncPacketUtil;
+    m_ncPacketUtil = NULL;
 
     delete m_pFileSizeBuffer;
     m_pFileSizeBuffer = NULL;
@@ -287,6 +350,67 @@ bool CIcanDtnManager::EventHandler(Message* msg){
     	return true;
     }
 
+    case MSG_ROUTING_ICAN_DTNMANAGER_NETWORKCODINGRECONSTRUCTED: {
+    	NetworkCoding_t* codingMetadata = (NetworkCoding_t*) MESSAGE_ReturnInfo(msg);
+        
+        std::string fragmentName = codingMetadata->getName();
+        std::cout<<"node "<<m_node->nodeIndex+1<<": "<<fragmentName<<" has been reconstructed"<<std::endl;
+
+        std::string objName = GetPrefixFromName(fragmentName);
+
+        if(m_pDtnDataStore->find(objName)==m_pDtnDataStore->end()){
+            //add the fragment id to datastore only when the full object is not found in datastore           
+            (*m_pDtnDataStore)[fragmentName] = codingMetadata->parentObjectFileSize; //NOTE: must store parent object size for fragment
+        }
+
+        //update file size buffer
+        (*m_pFileSizeBuffer)[objName] = codingMetadata->parentObjectFileSize;
+
+        //pass this fragment to fragmentation
+        m_networkcoding->receiveCodedBlock(*codingMetadata);
+
+        if(m_pHandshakeDataWaitingState->find(fragmentName)!=m_pHandshakeDataWaitingState->end()){            
+            //send ACK only if I'm waiting for this data...       
+            //remove data waiting flag
+            m_pHandshakeDataWaitingState->erase(fragmentName);
+
+            IcanDtnAckInfo ackinfo(fragmentName, true);
+            SetIcanEvent(m_node, 1*MICRO_SECOND, MSG_ROUTING_ICAN_DTNMANAGER_SENDACK, sizeof(ackinfo), &ackinfo);
+        }
+
+        //TODO: neighbor discovery
+        std::vector<Node*> neighborList = GetMyNeighborList(m_node, m_txrange);
+        for(vector<Node* >::iterator it = neighborList.begin();it != neighborList.end();it++){
+            Node* neighbor = (*it);
+            if(m_node->nodeIndex - neighbor->nodeIndex == 0){
+                continue;
+            }                                
+            RequestMatchingByObject(neighbor->nodeIndex,  fragmentName);
+        }
+ 
+        MESSAGE_Free(m_node, msg);
+    	return true;
+    }
+
+    case MSG_ROUTING_ICAN_DTNMANAGER_NETWORKCODINGOBJECTCONSTRUCTED: {    																	
+    	NetworkCoding_t* codingMetadata = (NetworkCoding_t*) MESSAGE_ReturnInfo(msg);
+
+	std::string blockName(codingMetadata->getName());
+	std::string objName = GetPrefixFromName(blockName);
+	(*m_pDtnDataStore)[objName] = codingMetadata->parentObjectFileSize;
+
+	//TODO clean up NC blocks from my datastore
+	//
+
+        NotifySubscriber(objName, codingMetadata->parentObjectFileSize);	
+
+        PrintTime(m_node);
+        std::cout<<"node "<<m_node->nodeIndex+1<<": FULL OBJECT "<<objName<<" has been reconstructed"<<std::endl;                		
+
+        MESSAGE_Free(m_node, msg);
+    	return true;
+    }
+
 
     case MSG_ROUTING_ICAN_DTNMANAGER_FRAGMENTEDOBJECTCONSTRUCTED:{
         Fragmentation_t* fragmentMetadata = (Fragmentation_t*) MESSAGE_ReturnInfo(msg);
@@ -302,6 +426,9 @@ bool CIcanDtnManager::EventHandler(Message* msg){
         NotifySubscriber(objName, fragmentMetadata->sizeBytesParentObject);	
        
         PrintTime(m_node);
+        std::cout<<"node "<<m_node->nodeIndex+1<<": FULL OBJECT "<<objName<<" has been reconstructed"<<std::endl;        
+        
+        //TODO neighbor interest matching? probably need this for NC..
                 
         MESSAGE_Free(m_node, msg);
         return true;        
@@ -311,6 +438,7 @@ bool CIcanDtnManager::EventHandler(Message* msg){
         Fragmentation_t* fragmentMetadata = (Fragmentation_t*) MESSAGE_ReturnInfo(msg);
 
         std::string fragmentName = fragmentMetadata->getName();
+        std::cout<<"node "<<m_node->nodeIndex+1<<": "<<fragmentName<<" has been reconstructed"<<std::endl;
 
         std::string objName = GetPrefixFromName(fragmentName);
 
@@ -334,6 +462,7 @@ bool CIcanDtnManager::EventHandler(Message* msg){
             SetIcanEvent(m_node, 1*MICRO_SECOND, MSG_ROUTING_ICAN_DTNMANAGER_SENDACK, sizeof(ackinfo), &ackinfo);
         }
 
+        //TODO: neighbor discovery
         std::vector<Node*> neighborList = GetMyNeighborList(m_node, m_txrange);
         for(vector<Node* >::iterator it = neighborList.begin();it != neighborList.end();it++){
             Node* neighbor = (*it);
@@ -369,6 +498,27 @@ bool CIcanDtnManager::EventHandler(Message* msg){
         return true;        
     }
 
+    case MSG_ROUTING_ICAN_DTNMANAGER_NCBLOCKHANDSHAKESTART:{
+        NetworkCoding_t* pMetadata = (NetworkCoding_t*) MESSAGE_ReturnInfo(msg);
+
+        ObjectBufferEntry entry(*pMetadata);
+        if(m_pHandshakeObjBuffer->find(pMetadata->getBufferId())!=m_pHandshakeObjBuffer->end()){
+            //means I have sent an RTS and awaiting for CTS
+            //ignore this one
+            std::cout<<m_node->nodeIndex+1<<": "<<pMetadata->getBufferId()<<" still in my buffer"<<std::endl;
+        }
+        else{
+            (*m_pHandshakeObjBuffer)[pMetadata->getBufferId()] = entry;
+
+            std::string metadataName = pMetadata->getName();
+
+            SendRTS(metadataName, pMetadata->targetNodeId, true);
+        }        
+
+
+        MESSAGE_Free(m_node, msg);
+        return true;        
+    }
 
     case MSG_ROUTING_ICAN_DTNMANAGER_SENDNEIGHBORINTEREST:{
         unsigned* nodeIndex = (unsigned*) MESSAGE_ReturnInfo(msg);
@@ -408,6 +558,8 @@ bool CIcanDtnManager::EventHandler(Message* msg){
             //store to file size buffer
             (*m_pFileSizeBuffer)[szObjectName] =objectSize;
 
+			//pass to networkcoding
+			m_networkcoding->RegisterObject(szObjectName);
 
 #ifdef DEBUG_ICAN_DTN
             PrintTime(m_node);
@@ -588,9 +740,11 @@ bool CIcanDtnManager::EventHandler(Message* msg){
             std::string object = GetPrefixFromName(*objId);
             std::cout<<m_node->nodeIndex+1<<": data "<<*objId<<" to "<<dest<<" has lost"<<std::endl;
 
+            //TODO fix this: efficiency issue, always reschedule a data
+
             size_t objSize = (*m_pDtnDataStore)[*objId];
-          
-           
+            
+            if(!m_enableNc){                    
                 if(!m_fragmentation->isDownloadCompleted(object, dest, objSize)){
                     //PrintTime(m_node);
                     Fragmentation_t fragMetadata =
@@ -599,7 +753,17 @@ bool CIcanDtnManager::EventHandler(Message* msg){
                     //push to queue                    
                     this->m_objectQueue->InsertFragmentToQueue(fragMetadata);
                 }                    
+            }
 
+            else{
+                //Check if we still need to send NC blocks? check nullspace vector...etc
+               NetworkCoding_t ncMetadata = m_networkcoding->createCodedBlockFromObject(object, dest, objSize);
+               //ncMetadata.Print();
+               if(!ncMetadata.isEmpty()) {
+                   //push to queue
+                   this->m_objectQueue->InsertNcblockToQueue(ncMetadata);
+               }
+            }
 
             
             m_pHandshakeAckWaitingState->erase(*objId);
@@ -613,7 +777,13 @@ bool CIcanDtnManager::EventHandler(Message* msg){
     default:
     {
 
-        bool freedByOthers = m_pInterestManager->EventHandler(msg) || m_fragmentPacketUtil->EventHandler(m_node, msg) || m_objectQueue->EventHandler(msg);
+        bool freedByOthers = m_pInterestManager->EventHandler(msg) || m_fragmentPacketUtil->EventHandler(m_node, msg) || m_objectQueue->EventHandler(msg)
+        	|| m_ncPacketUtil->EventHandler(m_node, msg);
+
+        //EventHandler hook goes here
+        //e.g.
+        //freedByOthers = m_ncManager->EventHandler(msg) || m_fragManager->EventHandler(msg);
+        //whichever class handled this event must do MESSAGE_Free
         
         return freedByOthers;
     }
@@ -624,6 +794,7 @@ bool CIcanDtnManager::EventHandler(Message* msg){
 }
 
 void CIcanDtnManager::SendNeighborInterestPacket(unsigned neighborNodeIndex){
+    //TODO stat
 
     bloom_filter nodeBf = m_pInterestManager->GetInterest(neighborNodeIndex);
     
@@ -643,7 +814,8 @@ void CIcanDtnManager::SendNeighborInterestPacket(unsigned neighborNodeIndex){
 }
 
 void CIcanDtnManager::RequestMatching(unsigned nodeIndex){
-   
+    //std::cout<<m_node->nodeIndex+1<<": request matching for neighbor "<<nodeIndex+1<<std::endl;
+    
     bool hasCacheSummary = false;
     
     bloom_filter cacheSummary;
@@ -653,6 +825,7 @@ void CIcanDtnManager::RequestMatching(unsigned nodeIndex){
     }
 
     if(!m_pDataRequestManager->HasRequest(nodeIndex)){
+        //std::cout<<"don't have request from this neighbor"<<std::endl;
         return;
     }
     
@@ -682,7 +855,9 @@ void CIcanDtnManager::RequestMatching(unsigned nodeIndex){
             if(request.contains(objectName)){               
                 if(!cacheSummary.contains(objectName) || !hasCacheSummary){                    
                     //found match                    
+//                    std::cout << "node "<<m_node->nodeIndex+1<<" found match: "<<objectName<<" size "<<objSize<<std::endl;
 
+                    if(!m_enableNc){                    
                         if(!m_fragmentation->isDownloadCompleted(objectName, nodeIndex, objSize)){
                             //PrintTime(m_node);
                             Fragmentation_t fragMetadata =
@@ -691,17 +866,31 @@ void CIcanDtnManager::RequestMatching(unsigned nodeIndex){
                             //push to queue                    
                             this->m_objectQueue->InsertFragmentToQueue(fragMetadata);
                         }                    
+                    }
 
-               }
+                    else{
+                        //Check if we still need to send NC blocks? check nullspace vector...etc
+                        NetworkCoding_t ncMetadata = m_networkcoding->createCodedBlockFromObject(objectName, nodeIndex, objSize);
+//                        printf("nodeid=%d\n",this->m_node->nodeId);
+                        ncMetadata.Print();
+                        if(!ncMetadata.isEmpty()) {
+//                            std::cout<<"push to queue"<<std::endl;
+                            //push to queue
+                            this->m_objectQueue->InsertNcblockToQueue(ncMetadata);
+                        }
+                    }
+                }
             }
         }        
     }
 }
 
 void CIcanDtnManager::RequestMatchingByObject(unsigned nodeIndex, std::string objName){   
+//    std::cout<<"request matching by object for neighbor "<<nodeIndex+1<<std::endl;
     
     bool hasCacheSummary = false;    
     if(!m_pDataRequestManager->HasRequest(nodeIndex)){
+        //std::cout<<"don't have request from this neighbor"<<std::endl;
         return;
     }
     bloom_filter request = m_pDataRequestManager->GetRequest(nodeIndex);                
@@ -716,6 +905,7 @@ void CIcanDtnManager::RequestMatchingByObject(unsigned nodeIndex, std::string ob
         if(!m_pCacheSummaryStore->HasObject(objName, nodeIndex)){                    
             //found match                    
             //std::cout << "node "<<m_node->nodeIndex+1<<" found match: "<<objName<<" size "<<objSize<<std::endl;					
+            if(!m_enableNc){                   
                 if(!m_fragmentation->isDownloadCompleted(objName, nodeIndex, objSize)){
                     //PrintTime(m_node);
                     Fragmentation_t fragMetadata =
@@ -724,7 +914,19 @@ void CIcanDtnManager::RequestMatchingByObject(unsigned nodeIndex, std::string ob
                     //push to queue                    
                     this->m_objectQueue->InsertFragmentToQueue(fragMetadata);
                 }                    
-      }
+            }
+
+            else{
+                NetworkCoding_t ncMetadata = m_networkcoding->createCodedBlockFromObject(objName, nodeIndex, objSize);
+//                printf("nodeid=%d\n",this->m_node->nodeId);
+//                ncMetadata.Print();
+                if(!ncMetadata.isEmpty()){
+                    //std::cout<<"push to queue"<<std::endl;
+                    //push to queue
+                    this->m_objectQueue->InsertNcblockToQueue(ncMetadata);
+                }
+            }
+       }
     }
 }
 
@@ -827,7 +1029,27 @@ void CIcanDtnManager::PacketHandler(Node* node, Message* msg){
             return;
             
         }
+        case tyCoding:{
+            m_stat.totalNcIn++;
+            m_stat.totalNcBytesIn+=MESSAGE_ReturnPacketSize(msg);
+            
+            NetworkCodingPacket* fragPacket = (NetworkCodingPacket*) (icanhdr+1);
 
+            //Only pass to fragmentpacketutil when I don't have this fragment or object in my datastore
+            std::string fragName = fragPacket->GetName();
+            std::string objectName = GetPrefixFromName(fragName);
+            if(m_pDtnDataStore->find(fragName)==m_pDtnDataStore->end()
+                && m_pDtnDataStore->find(objectName) == m_pDtnDataStore->end()){
+                        
+                SetIcanEvent(m_node, 0, MSG_ROUTING_ICAN_DTN_NETWORKCODINGPACKETUTIL_RECEIVEBLOCK, sizeof(NetworkCodingPacket), fragPacket);
+            }
+            
+            MESSAGE_Free(node, msg);            
+            return;
+            
+        }
+
+ 
         case tyDtnRts:{
             m_stat.totalRtsIn++;
             m_stat.totalRtsBytesIn+=MESSAGE_ReturnPacketSize(msg);
@@ -915,9 +1137,13 @@ void CIcanDtnManager::SendACK(std::string objectId, bool isNc){
     m_stat.totalAckBytesOut+=MESSAGE_ReturnPacketSize(ackmsg);
     
     SendIcanPacket(m_node, 0, ackmsg);
+
+    //TODO: if I'm receiving from many sender, how do they handle this ACK? Optimization?
 }
 
 void CIcanDtnManager::HandleRTS(DTNRTSPacket rtspkt){
+    //TODO raise event to notify frag/NC for purging
+
 
     std::cout<<m_node->nodeIndex+1<<" receives RTS from "<<rtspkt.srcName+1<<" targeting "<<rtspkt.destName+1<<std::endl;
     
@@ -929,6 +1155,7 @@ void CIcanDtnManager::HandleRTS(DTNRTSPacket rtspkt){
                 
 		std::string objName(rtspkt.objectName);
 
+		//TODO we may want to add more info to the packets and keep track of how many data I have requested from other neighbors?! Otherwise may accept redundant.
 		std::string fullObjName = GetPrefixFromName(objName);
 		if(m_pDtnDataStore->find(objName)==m_pDtnDataStore->end() && m_pDtnDataStore->find(fullObjName)==m_pDtnDataStore->end()){
 			if(m_pHandshakeDataWaitingState->find(objName)!=m_pHandshakeDataWaitingState->end() &&
@@ -944,6 +1171,15 @@ void CIcanDtnManager::HandleRTS(DTNRTSPacket rtspkt){
 				return;
 			}
             
+            		//NC mixing reject case (check coefficients) TODO: test
+            		if(!m_networkcoding->acceptBlock(rtspkt.objectName)){
+                            std::cout<<m_node->nodeIndex+1<<" send CTS packet rejecting non-innovative block from "<<rtspkt.srcName<<std::endl;
+                            DTNCTSPacket ctspkt(m_node->nodeIndex, rtspkt.srcName, rtspkt.objectName, rtspkt.isNc, false, false, false, true);
+			    Message* ctsmsg = GeneratePacket(m_node, &ctspkt, tyDtnCts, 0);
+			    SendIcanPacket(m_node, 0, ctsmsg);
+			    return;
+                        }
+
 			//keep state remembering I'm waiting for this data
 			(*m_pHandshakeDataWaitingState)[objName] = rtspkt.srcName;            
 			SetIcanEvent(m_node, m_ctsExpireTime, MSG_ROUTING_ICAN_DTNMANAGER_CTSTIMEOUT, sizeof(objName), &objName);   
@@ -988,7 +1224,15 @@ void CIcanDtnManager::HandleCTS(DTNCTSPacket ctspkt){
     if(ctspkt.isAccept == false){
         std::string fragName(ctspkt.objectName);
         std::string fullName = GetPrefixFromName(fragName);
+/*
+        if(ctspkt.isRejectNcMixing){
+            //notify network coding //TODO: test
+            if(m_enableNc){
+                m_networkcoding->rejectBlock(fullName, ctspkt.srcName);
+            }
+        }
 
+  */      
         if(ctspkt.isHaveObject== true){
             //add full object to cache summary       
             m_pCacheSummaryStore->UpdateCacheSummaryWithFullName(ctspkt.srcName,  fullName);                    
@@ -1017,9 +1261,14 @@ void CIcanDtnManager::HandleCTS(DTNCTSPacket ctspkt){
 				(*m_pHandshakeAckWaitingState)[objName] = ctspkt.srcName;
 				SetIcanEvent(m_node, m_dataSendExpireTime, MSG_ROUTING_ICAN_DTNMANAGER_DATASENDTIMEOUT, sizeof(objName), &objName);   
 
+				if(ctspkt.isNc == false){	
 					Fragmentation_t metadata = (*m_pHandshakeObjBuffer)[objId].fragmentMetadata;
 					SetIcanEvent(m_node, 0, MSG_ROUTING_ICAN_DTN_FRAGMENTPACKETUTIL_SENDFRAGMENT, sizeof(metadata), &metadata);
-				
+				}
+				else{
+					NetworkCoding_t metadata = (*m_pHandshakeObjBuffer)[objId].ncblockMetadata;
+					SetIcanEvent(m_node, 0, MSG_ROUTING_ICAN_DTN_NETWORKCODINGPACKETUTIL_SENDNCBLOCK, sizeof(metadata), &metadata);						
+				}
 			}
 			else{
 				std::cout<<"!!!!WARNING: cannot find fragment/block in buffer. expired?";
@@ -1029,6 +1278,14 @@ void CIcanDtnManager::HandleCTS(DTNCTSPacket ctspkt){
 			m_pHandshakeObjBuffer->erase(objId);
        }
         else{
+			if(ctspkt.isRejectNcMixing){
+				//notify network coding //TODO: test
+				std::string fullName = GetPrefixFromName(objName);
+				if(m_enableNc){
+					m_networkcoding->rejectBlock(fullName, ctspkt.srcName);
+				}
+			}
+
  
 
             std::cout<<"REJECT "<<objName<<std::endl;
@@ -1040,7 +1297,12 @@ void CIcanDtnManager::HandleCTS(DTNCTSPacket ctspkt){
 
             if(ctspkt.isHaveObject) return;
             else{
-            RetrieveNextFragment(fragName, ctspkt.srcName);
+		if(ctspkt.isNc){				
+	    	    RetrieveNextNCBlock(fragName, ctspkt.srcName);
+		}
+		else{		
+	            RetrieveNextFragment(fragName, ctspkt.srcName);
+		}
             }
         }
     }   
@@ -1069,7 +1331,12 @@ void CIcanDtnManager::HandleACK(DTNACKPacket ackpkt){
 
             if(!ackpkt.hasFullObject){
                 //Use parent object name or fragment name to get the full object size
-                   RetrieveNextFragment(fragName, ackpkt.srcName);
+                if(m_enableNc){
+                    RetrieveNextNCBlock(fragName, ackpkt.srcName);
+                }
+                else{
+                    RetrieveNextFragment(fragName, ackpkt.srcName);
+                }
             }
         }
 }
@@ -1099,107 +1366,132 @@ void CIcanDtnManager::RetrieveNextFragment(std::string fragName, unsigned target
         this->m_objectQueue->InsertFragmentToQueue(fragMetadata);
     }
 }
+void CIcanDtnManager::RetrieveNextNCBlock(std::string fragName, unsigned targetNodeIndex){
+    //Use parent object name or fragment name to get the full object size
+    //
+    std::string objectName = GetPrefixFromName(fragName);        
+    size_t objSize = GetFileSizeByObjectName(objectName);
+            
+    //Take next block
+    NetworkCoding_t fragMetadata =
+            m_networkcoding->createCodedBlockFromObject(objectName, targetNodeIndex, objSize);
+    printf("nodeid=%d\n",this->m_node->nodeId);
+    fragMetadata.Print();
+    if(!fragMetadata.isEmpty()){
+        //push to queue                    
+        this->m_objectQueue->InsertNcblockToQueue(fragMetadata);
+    }
+}
+
 
 void CIcanDtnManager::PrintStat(Node* node,   NetworkType networkType){
 
     char buf[MAX_STRING_LENGTH];
 
     sprintf(buf, "Total DTN Requests sent = %d", m_stat.totalRequestOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN Requests bytes sent = %d", m_stat.totalRequestBytesOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
     
     sprintf(buf, "Total DTN Interests sent = %d", m_stat.totalInterestOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN Interests bytes sent = %d", m_stat.totalInterestBytesOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN CacheSummary sent = %d", m_stat.totalCacheSummaryOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN CacheSummary bytes sent = %d", m_stat.totalCacheSummaryBytesOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);    
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);    
 
 
 
     sprintf(buf, "Total DTN RTS sent = %d", m_stat.totalRtsOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN RTS bytes sent = %d", m_stat.totalRtsBytesOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN ACCEPT sent = %d", m_stat.totalCtsAcceptOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN ACCEPT bytes sent = %d", m_stat.totalCtsAcceptBytesOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN REJECT sent = %d", m_stat.totalCtsRejectOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN REJECT bytes sent = %d", m_stat.totalCtsRejectBytesOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN ACK sent = %d", m_stat.totalAckOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN ACK bytes sent = %d", m_stat.totalAckBytesOut);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
 
     sprintf(buf, "Total DTN Requests received = %d", m_stat.totalRequestIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN Request bytes received = %d", m_stat.totalRequestBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN Interests received = %d", m_stat.totalInterestIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN Interests bytes received = %d", m_stat.totalInterestBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN CacheSummary received = %d", m_stat.totalCacheSummaryIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN CacheSummary bytes received = %d", m_stat.totalCacheSummaryBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN RTS received = %d", m_stat.totalRtsIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN RTS bytes received = %d", m_stat.totalRtsBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN ACCEPT received = %d", m_stat.totalCtsAcceptIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN ACCEPT bytes received = %d", m_stat.totalCtsAcceptBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN REJECT received = %d", m_stat.totalCtsRejectIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN REJECT bytes received = %d", m_stat.totalCtsRejectBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN ACK received = %d", m_stat.totalAckIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN ACK bytes received = %d", m_stat.totalAckBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
     sprintf(buf, "Total DTN FragmentPacket received = %d", m_stat.totalFragIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
 
     sprintf(buf, "Total DTN FragmentPacket bytes received = %d", m_stat.totalFragBytesIn);
-    IO_PrintStat(node, "DTN", "ICAN", ANY_DEST, 0, buf);   
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
+
+    sprintf(buf, "Total DTN NetworkCodingPacket received = %d", m_stat.totalNcIn);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);
+
+    sprintf(buf, "Total DTN NetworkCodingPacket bytes received = %d", m_stat.totalNcBytesIn);
+    IO_PrintStat(node, "Network", "ICAN", ANY_DEST, 0, buf);   
 
 
     m_fragmentation->Printstat(node, networkType);
     m_fragmentPacketUtil->Printstat(node, networkType);
-}
 
+    m_networkcoding->Printstat(node, networkType);
+    m_ncPacketUtil->Printstat(node, networkType);
+}
 

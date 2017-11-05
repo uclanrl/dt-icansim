@@ -16,12 +16,16 @@
 * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, 
 * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+
 #ifndef ICAN_DTN_COMMON_H
 #define ICAN_DTN_COMMON_H
 
 
 #include "ican_common.h"
 #include "bloom_filter.hpp"
+#include "coding/nc.h"
+
+enum NetworkCodingOption {nc_sourceonly, nc_mixing, nc_fullobjectonly};
 
 struct Fragmentation_t{
 	char parentObjectName[PARENTOBJECTNAMELEN+1];
@@ -58,7 +62,7 @@ struct Fragmentation_t{
 	}
 	virtual Fragmentation_t& operator=(Fragmentation_t const& o) {
 		memset(this->parentObjectName, 0, sizeof(char)*PARENTOBJECTNAMELEN+1);
-		strncpy(this->parentObjectName, o.parentObjectName, sizeof(this->parentObjectName));
+	    strncpy(this->parentObjectName, o.parentObjectName, sizeof(this->parentObjectName));
 	
 		this->fragmentid = o.fragmentid;
 		this->sizeBytesParentObject = o.sizeBytesParentObject;
@@ -77,7 +81,8 @@ struct Fragmentation_t{
         }
 
 	bool objectEqual(Fragmentation_t & n ) const{
-		if( strcmp(this->parentObjectName, n.parentObjectName)==0 && 
+		if( strcmp(this->parentObjectName, n.parentObjectName)==0 &&
+//    	   		this->fragmentid == n.fragmentid &&
         	    this->sizeBytesParentObject == n.sizeBytesParentObject){
 	            return true;
   	        }
@@ -87,7 +92,7 @@ struct Fragmentation_t{
         std::string getName()
         {
             std::string packetname(this->parentObjectName);
-            packetname = packetname + "/"+IntToString(fragmentid);
+            packetname = packetname + "/"+convertInt(fragmentid);
 
             return packetname;
         }
@@ -95,7 +100,7 @@ struct Fragmentation_t{
         std::string getBufferId()
         {
             std::string bufferid(this->parentObjectName);
-            bufferid = bufferid+"/"+IntToString(fragmentid)+"/"+IntToString(targetNodeId);
+            bufferid = bufferid+"/"+convertInt(fragmentid)+"/"+IntToString(targetNodeId);
             return bufferid;
         }
 
@@ -105,6 +110,121 @@ struct Fragmentation_t{
            std::cout<< "ParentObjectName: "<<objName<<std::endl
             <<"fragment ID: "<<fragmentid<<std::endl
             <<"sizeParentObject:"<<sizeBytesParentObject<<std::endl
+            <<"targetNodeId:"<<targetNodeId<<std::endl;
+        }
+};
+
+struct NetworkCoding_t {
+	char parentObjectName[PARENTOBJECTNAMELEN+1];
+	long parentObjectFileSize;
+	unsigned targetNodeId;
+	int networkcodingblockid;
+	bool isMixed;
+
+	virtual ~NetworkCoding_t() {
+
+	}
+	NetworkCoding_t() {
+		memset(this->parentObjectName, 0, sizeof(char)*PARENTOBJECTNAMELEN+1);
+		this->parentObjectFileSize = -1;
+		this->targetNodeId = -1;
+		this->networkcodingblockid = -1;
+		this->isMixed = false;
+	}
+	NetworkCoding_t(std::string _parentObjectName,
+			long _parentObjectFileSize,
+			unsigned _targetNodeId,int _networkcodingblockid, bool _isMixed ) {
+		memset(this->parentObjectName, 0, sizeof(char)*(PARENTOBJECTNAMELEN+1));
+        strncpy(this->parentObjectName, _parentObjectName.c_str(), sizeof(this->parentObjectName));
+
+		this->parentObjectFileSize = _parentObjectFileSize;
+		this->targetNodeId = _targetNodeId;
+		this->networkcodingblockid = _networkcodingblockid;
+		this->isMixed = _isMixed;
+	}
+	NetworkCoding_t(NetworkCoding_t const & o) {
+		memset(this->parentObjectName, 0, sizeof(char)*(PARENTOBJECTNAMELEN+1));
+	        strncpy(this->parentObjectName, o.parentObjectName, sizeof(this->parentObjectName));
+	
+		this->parentObjectFileSize = o.parentObjectFileSize;
+		this->targetNodeId = o.targetNodeId;
+		this->networkcodingblockid = o.networkcodingblockid;
+		this->isMixed = o.isMixed;
+	}
+	virtual NetworkCoding_t& operator=(NetworkCoding_t const& o) {
+
+		memset(this->parentObjectName, 0, sizeof(char)*(PARENTOBJECTNAMELEN+1));
+	        strncpy(this->parentObjectName, o.parentObjectName, sizeof(this->parentObjectName));
+
+		this->parentObjectFileSize = o.parentObjectFileSize;
+		this->targetNodeId = o.targetNodeId;
+		this->networkcodingblockid = o.networkcodingblockid;
+		this->isMixed = o.isMixed;
+		return *this;
+	}
+
+	bool operator==(NetworkCoding_t & n ) const {
+		//TODO: how to check nc coefficients? or maybe we can simply skip it?
+		if( strcmp(this->parentObjectName, n.parentObjectName)==0 &&
+			this->parentObjectFileSize == n.parentObjectFileSize &&
+			this->networkcodingblockid == n.networkcodingblockid &&
+			this->targetNodeId == n.targetNodeId &&
+			this->isMixed == n.isMixed){
+			return true;
+		}
+		return false;
+    }
+
+	bool objectEqual(NetworkCoding_t & n ) const {
+		//TODO: how to check nc coefficients? or maybe we can simply skip it?
+		if( strcmp(this->parentObjectName, n.parentObjectName)==0 &&
+			this->parentObjectFileSize == n.parentObjectFileSize &&
+//			this->networkcodingblockid == n.networkcodingblockid &&
+			this->isMixed == n.isMixed){
+			return true;
+		}
+		return false;
+    }
+
+	bool operator<(const NetworkCoding_t &other) const { return this->networkcodingblockid < other.networkcodingblockid; }
+
+	std::string getName() {
+    	std::string separatorName("/");
+    	std::string stringBlockId = convertInt(networkcodingblockid);
+
+        std::string objectName =
+        		(this->parentObjectName)+separatorName+stringBlockId;
+        return objectName;
+	}
+
+	std::string getBlockIdOnly() {
+		std::string stringBlockId = convertInt(networkcodingblockid);
+		return stringBlockId;
+	}
+
+	std::string getBufferId() {
+    	std::string separatorName("/");
+    	std::string stringBlockId = convertInt(networkcodingblockid);
+    	std::string stringTargetNodeId = convertInt(targetNodeId);
+
+        std::string objectName =
+        		(this->parentObjectName)+separatorName+stringBlockId+separatorName+stringTargetNodeId;
+        return objectName;
+	}
+
+	bool isEmpty(){
+		if(this->networkcodingblockid == -1 || this->networkcodingblockid == 0){
+			return true;
+		}
+		return false;
+	}
+
+
+	void Print(){            
+		std::string objName(parentObjectName);
+           std::cout<< "ParentObjectName: "<<objName<<std::endl
+            <<"NC ID: "<<networkcodingblockid<<std::endl
+            <<"sizeParentObject:"<<parentObjectFileSize<<std::endl
             <<"targetNodeId:"<<targetNodeId<<std::endl;
         }
 };

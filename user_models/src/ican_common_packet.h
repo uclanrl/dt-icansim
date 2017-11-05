@@ -17,18 +17,64 @@
 * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+/*
+   @file ican_common_packet.h
+   @brief defined ICAN packet formats
+	  	enum packetType: defined all packet types that can be used
+	  	    tyInterest--InterestPacket
+	  	    tyData--DataPacket
+	  	    tyGeoFloodInterest--GeoFloodInterestPacket
+	  	    tyActiveInterest--ActiveFloodInterestPacket
+	  	    tyGeoData--GeoRouteDataPacket
+	  	    tyGeoInterest--GeoRouteInterestPacket
+	  	    tyBfrGeoInterest--BfrInterestPacket
+                    tyDtnRequest, 
+                    tyDtnCacheSummary, 
+                    tyFragment, 
+                    tyDtnRts, 
+                    tyDtnCts, 
+                    tyDtnAck, 
+                    tyDtnInterest
+
+	  	    tyBeacon--BeaconPkt, see ican_beacon.h
+	  	    tyNodeAdv--NodeAdvPacket, see ican_bfr_common.h
+	  	    tyPartitionAdv--PartitionAdvPacket, see ican_bfr_common.h
+
+        IcanHeader: all packets must carry ICAN Header, which carries the packet type indicator
+        ICNPacket: all ICN Packets must inherit this type
+        InterestPacket: basic interest
+        DataPacket: basic data packet without payload
+
+        GeoRouteDataPacket: data packet with destination and lasthop geo coordinates
+        GeoFloodInterestPacket: interest packets carring last hop location
+        BfrInterestPacket: interest packet of BFR
+        GeoRouteInterestPacket: georouting interest
+        ActiveFloodInterestPacket: active flooding interest
+
+    @Author: Yu-Ting Yu
+    @Date: 2013/6/15
+*/
+
+
 #ifndef ICAN_COMMON_PACKET_H
 #define ICAN_COMMON_PACKET_H
 
+#include "ican_geocoordinate.h"
 #include "bloom_filter.hpp"
+#include "ncutil.h"
 
-enum packetType {tyDtnRequest, tyDtnCacheSummary, tyFragment, tyDtnRts, tyDtnCts, tyDtnAck, tyDtnInterest};
+enum packetType {tyInterest, tyData, tyNodeAdv, tyPartitionAdv, tyBfrGeoInterest, tyGeoFloodInterest, tyBeacon, tyActiveInterest, tyGeoData, tyGeoInterest, tyAck, tyDtnRequest, tyDtnCacheSummary, tyFragment, tyCoding,tyDtnRts, tyDtnCts, tyDtnAck, tyDtnInterest};
 
 extern std::string pktTypeString[];
 
-extern std::string IntToString(int i);
+
+typedef clocktype freshnessIndexUnit ;
 
 bool IsDtnPacket(packetType pType);
+bool IsIcnPacket(packetType pType);
+bool IsIcnInterest(packetType pType);
+bool IsIcnData(packetType pType);
+bool IsAck(packetType pType);
 void PrintSendLog(Node* node, Message* const  msg);
 void PrintRecvLog(Node* node, Message* const  msg);
 
@@ -54,7 +100,7 @@ struct Packet
 struct DTNPacket:public Packet
 {
 
-    unsigned srcName;  
+    unsigned srcName;  //note: get source name by node->nodeIndex
 
     DTNPacket():srcName(999999)
     {
@@ -131,9 +177,9 @@ struct DTNCTSPacket: public DTNPacket{
     unsigned destName;
     char objectName[HANDSHAKENAMELEN+1];
     bool isAccept;
-    bool isHaveBlock; 
-    bool isHaveObject; 
-    bool isRejectNcMixing; 
+    bool isHaveBlock; //1 means i have this block already, 0 means other (say neighbors are sending this one..)
+    bool isHaveObject; //1 means i have the full object
+    bool isRejectNcMixing; //1 means non-innovative
     
     virtual ~DTNCTSPacket() {}
 
@@ -225,6 +271,92 @@ struct DTNACKPacket: public DTNPacket{
     }	
 };
 
+
+struct NetworkCodingPacket: public DTNPacket {
+	char parentObjectName[PARENTOBJECTNAMELEN+1];
+	int networkcodingblockid;
+	size_t sizeParentObject;
+	int sequenceNumber;
+	unsigned targetNodeId;
+	bool isMixed;
+
+	virtual ~NetworkCodingPacket() {
+
+	}
+
+
+	NetworkCodingPacket() {
+		memset(this->parentObjectName, 0, sizeof(char)*(PARENTOBJECTNAMELEN+1));
+		this->networkcodingblockid = -1;
+		this->sizeParentObject = -1;
+		this->sequenceNumber = -1;
+		this->targetNodeId = -1;
+		this->isMixed = false;
+	}
+
+	NetworkCodingPacket(unsigned _srcName,
+			std::string _parentObjectName, int _networkcodingblockid,int _sequenceNumber,
+			unsigned _targetNodeId,size_t _sizeParentObject,bool _isMixed) : targetNodeId(_targetNodeId) {
+		this->srcName = _srcName;
+        memset(this->parentObjectName, 0, sizeof(char)*PARENTOBJECTNAMELEN+1);
+        strncpy(this->parentObjectName, _parentObjectName.c_str(), sizeof(this->parentObjectName));
+		this->networkcodingblockid = _networkcodingblockid;
+		this->sequenceNumber = _sequenceNumber;
+		this->sizeParentObject = _sizeParentObject;
+		this->isMixed = _isMixed;
+	}
+	NetworkCodingPacket(NetworkCodingPacket const & o):DTNPacket(o) {
+        memset(this->parentObjectName, 0, sizeof(char)*(PARENTOBJECTNAMELEN+1));
+        strncpy(this->parentObjectName, o.parentObjectName, sizeof(this->parentObjectName));
+		this->networkcodingblockid = o.networkcodingblockid;
+		this->sequenceNumber = o.sequenceNumber;
+		this->targetNodeId = o.targetNodeId;
+		this->sizeParentObject = o.sizeParentObject;
+		this->isMixed = o.isMixed;
+	}
+	virtual NetworkCodingPacket& operator=(NetworkCodingPacket const& o) {
+		DTNPacket::operator = (o);
+        memset(this->parentObjectName, 0, sizeof(char)*(PARENTOBJECTNAMELEN+1));
+        strncpy(this->parentObjectName, o.parentObjectName, sizeof(this->parentObjectName));
+		this->networkcodingblockid = o.networkcodingblockid;
+		this->sequenceNumber = o.sequenceNumber;
+		this->targetNodeId = o.targetNodeId;
+		this->sizeParentObject = o.sizeParentObject;
+		this->isMixed = o.isMixed;
+		return *this;
+	}
+    virtual void PrintPacket()
+    {
+        std::cout<<"parentObjectName: "<<parentObjectName
+        		<<"sizeParentObject: "<<sizeParentObject
+        		<<"networkcodingblockid: "<<networkcodingblockid
+        		<<"sequencenumber: "<<sequenceNumber
+        		<<"targetnodeid:"<<targetNodeId
+        		<<"isMixed:"<<isMixed<<std::endl;
+    }
+
+    std::string GetBlockName()
+    {
+    	std::string separatorName("/");
+    	std::string stringBlockId = convertInt(networkcodingblockid);
+
+        std::string packetname = (this->parentObjectName)
+        		+separatorName+stringBlockId;
+        return packetname;
+    }
+
+    std::string GetName()
+    {
+    	std::string separatorName("/");
+    	std::string stringBlockId = convertInt(networkcodingblockid);
+    	std::string stringSequenceNumber = convertInt(sequenceNumber);
+        std::string packetname = (this->parentObjectName)
+        		+separatorName+stringBlockId+separatorName+stringSequenceNumber;
+        return packetname;
+    }
+
+};
+
 struct FragmentationPacket: public DTNPacket {
 	char parentObjectName[PARENTOBJECTNAMELEN+1];
 	int fragmentid;
@@ -272,8 +404,8 @@ struct FragmentationPacket: public DTNPacket {
     }
     std::string GetPacketName()
     {
-    	std::string stringFragmentId = IntToString(fragmentid);
-    	std::string stringSequenceNumber = IntToString(sequenceNumber);
+    	std::string stringFragmentId = convertInt(fragmentid);
+    	std::string stringSequenceNumber = convertInt(sequenceNumber);
     	std::string separatorName("/");
         std::string packetname = (this->parentObjectName)
         		+separatorName+stringFragmentId+separatorName+stringSequenceNumber;
@@ -282,13 +414,104 @@ struct FragmentationPacket: public DTNPacket {
 
     std::string GetFragmentName()
     {
-    	std::string stringFragmentId = IntToString(fragmentid);
+    	std::string stringFragmentId = convertInt(fragmentid);
     	std::string separatorName("/");
         std::string packetname = (this->parentObjectName)
         		+separatorName+stringFragmentId;
         return packetname;
     }
 
+};
+
+struct AckPacket:public Packet
+{
+    char szNonce [MAXPACKETSTRINGLEN];
+    AckPacket(std::string s)
+    {
+        memset(szNonce, 0, sizeof(szNonce));
+        strncpy(szNonce, s.c_str(), sizeof(szNonce));
+    }
+    AckPacket(AckPacket const & o)
+    {
+        memset(szNonce, 0, sizeof(szNonce));
+        strncpy(szNonce, o.szNonce, sizeof(szNonce));
+    }
+    virtual AckPacket& operator = (AckPacket const & o)
+    {
+        Packet::operator = (o);
+        memset(szNonce, 0, sizeof(szNonce));
+        strncpy(szNonce, o.szNonce, sizeof(szNonce));
+        return *this;
+    }
+    virtual ~AckPacket() {}
+    std::string GetNonce()
+    {
+        std::string s(szNonce, strlen(szNonce));
+        return s;
+    }
+    void SetNonce(std::string s)
+    {
+        strncpy(szNonce, s.c_str(), sizeof(szNonce));
+    }
+
+    virtual void PrintPacket()
+    {
+        std::string nonce(szNonce, strlen(szNonce));
+        std::cout<<"nonce: "<<nonce<<std::endl;
+    }
+};
+
+struct ICNPacket:public Packet
+{
+    char szNonce [MAXPACKETSTRINGLEN];
+    unsigned lastHopName;
+    unsigned srcName;
+
+    ICNPacket():lastHopName(999999), srcName(999999) 
+    {
+        memset(szNonce, 0, sizeof(szNonce));
+    }
+    ICNPacket(ICNPacket const & o)
+    {
+        memset(szNonce, 0, sizeof(szNonce));
+        strncpy(szNonce, o.szNonce, sizeof(szNonce));
+        lastHopName = o.lastHopName;
+        srcName = o.srcName;
+    }
+    virtual ICNPacket& operator = (ICNPacket const & o)
+    {
+        Packet::operator = (o);
+        memset(szNonce, 0, sizeof(szNonce));
+        strncpy(szNonce, o.szNonce, sizeof(szNonce));
+        lastHopName = o.lastHopName;
+        srcName = o.srcName;
+        return *this;
+    }
+    virtual ~ICNPacket() {}
+    std::string GetNonce()
+    {
+        std::string s(szNonce, strlen(szNonce));
+        return s;
+    }
+    void SetNonce(std::string s)
+    {
+        strncpy(szNonce, s.c_str(), sizeof(szNonce));
+    }
+
+    virtual void PrintPacket()
+    {
+        std::string nonce(szNonce, strlen(szNonce));
+        std::cout<<"nonce: "<<nonce<<std::endl
+                 <<"last Hop: "<<lastHopName+1<<std::endl
+                 <<"src: "<<srcName +1<<std::endl;
+    }
+
+    virtual bool Initialized()
+    {
+        if(lastHopName -999999 ==0) return false;
+        if(srcName -999999 == 0) return false;
+        else return true;
+    }
 };
 
 typedef struct DtnRequestPacket:public DTNPacket
@@ -314,6 +537,7 @@ typedef struct DtnRequestPacket:public DTNPacket
     {
         std::cout<<"===============DTN Request Packet============="<<std::endl;
         DTNPacket::PrintPacket();
+        //std::cout  <<"id: "<<id<<std::endl;
     }
     virtual ~DtnRequestPacket() {}
 } DtnRequestPacket;
@@ -371,8 +595,307 @@ typedef struct DtnCacheSummaryPacket:public DTNPacket
     {
         std::cout<<"===============DTN Cache Summary Packet============="<<std::endl;
         DTNPacket::PrintPacket();
+        //std::cout  <<"id: "<<id<<std::endl;
     }
     virtual ~DtnCacheSummaryPacket() {}
 } DtnCacheSummaryPacket;
+
+typedef struct InterestPacket:public ICNPacket
+{
+    char szInterestName [MAXPACKETSTRINGLEN];
+    char szReqAppId[MAXPACKETSTRINGLEN];
+
+    InterestPacket():ICNPacket()
+    {
+        memset(szInterestName, 0, sizeof(szInterestName));
+        memset(szReqAppId, 0, sizeof(szReqAppId));
+    }
+    InterestPacket(InterestPacket const & o):ICNPacket(o)
+    {
+        memset(szInterestName, 0, sizeof(szInterestName));
+        memset(szReqAppId, 0, sizeof(szReqAppId));
+        strncpy(szInterestName, o.szInterestName, sizeof(szInterestName));
+        strncpy(szReqAppId, o.szReqAppId, sizeof(szReqAppId));
+    }
+    InterestPacket& operator = (InterestPacket const & o)
+    {
+        ICNPacket::operator = (o);
+        memset(szInterestName, 0, sizeof(szInterestName));
+        memset(szReqAppId, 0, sizeof(szReqAppId));
+        strncpy(szInterestName, o.szInterestName, sizeof(szInterestName));
+        strncpy(szReqAppId, o.szReqAppId, sizeof(szReqAppId));
+        return *this;
+    }
+
+    std::string GetName()
+    {
+        std::string s(szInterestName, strlen(szInterestName));
+        return s;
+    }
+
+    virtual void PrintPacket()
+    {
+        std::cout<<"===============Interest Packet============="<<std::endl;
+        ICNPacket::PrintPacket();
+        std::string name(szInterestName, strlen(szInterestName));
+        std::string req(szReqAppId, strlen(szReqAppId));
+        std::cout <<"interest name: "<<name<<std::endl
+                  <<"requester id: "<<req<<std::endl;
+    }
+    virtual ~InterestPacket() {}
+} InterestPacket;
+
+
+typedef struct DataPacket:public ICNPacket
+{
+    char szInterestName[MAXPACKETSTRINGLEN];
+    short nSize; //packet size
+    DataPacket():ICNPacket(), nSize(-1)
+    {
+        memset(szInterestName, 0, sizeof(szInterestName));
+    }
+    DataPacket(DataPacket const & o)
+        :ICNPacket(o), nSize(o.nSize)
+    {
+        memset(szInterestName, 0, sizeof(szInterestName));
+        strncpy(szInterestName, o.szInterestName, sizeof(szInterestName));
+    }
+    DataPacket& operator =(DataPacket const & o)
+    {
+        ICNPacket::operator = (o);
+        nSize = o.nSize;
+        memset(szInterestName, 0, sizeof(szInterestName));
+        strncpy(szInterestName, o.szInterestName, sizeof(szInterestName));
+        return *this;
+    }
+    virtual ~DataPacket() {}
+    bool IsEmpty()
+    {
+        if(nSize ==-1 ) return true;
+        else return false;
+    }
+
+    std::string GetName()
+    {
+        std::string s(szInterestName, strlen(szInterestName));
+        return s;
+    }
+    virtual void PrintPacket()
+    {
+        std::cout<<"===============Data Packet============="<<std::endl;
+        ICNPacket::PrintPacket();
+        std::string name(szInterestName, strlen(szInterestName));
+        std::cout
+                <<"data name: "<<name<<std::endl
+                <<"size: "<<nSize<<std::endl;
+    }
+} DataPacket;
+
+typedef struct GeoRouteDataPacket:public DataPacket
+{
+    GeoCoordinate dest;
+    GeoCoordinate lastHop;
+
+    GeoRouteDataPacket():DataPacket() {}
+    GeoRouteDataPacket(DataPacket const & o):DataPacket(o)
+    {
+        //Note that lastHop and dest are not initialized yet.
+    }
+
+    GeoRouteDataPacket(GeoRouteDataPacket const & o)
+        :DataPacket(o), dest(o.dest), lastHop(o.lastHop)
+    {
+    }
+    GeoRouteDataPacket& operator =(GeoRouteDataPacket const & o)
+    {
+        DataPacket::operator = (o);
+        dest = o.dest;
+        lastHop = o.lastHop;
+        return *this;
+    }
+    virtual ~GeoRouteDataPacket() {}
+    virtual bool Initialized()
+    {
+        if(dest.Initialized() && lastHop.Initialized()) return true;
+        else return ICNPacket::Initialized();
+    }
+
+    virtual void PrintPacket()
+    {
+        std::cout<<"===============GeoData Packet============="<<std::endl;
+        DataPacket::PrintPacket();
+        std::cout
+                <<"dest: "<<dest.toString()<<std::endl
+                <<"lastHop: "<<lastHop.toString()<<std::endl;
+
+    }
+} GeoRouteDataPacket;
+
+
+typedef struct GeoFloodInterestPacket:public InterestPacket
+{
+    GeoCoordinate lastHopLoc;
+
+    GeoFloodInterestPacket():InterestPacket() {}
+    GeoFloodInterestPacket(InterestPacket const & o):InterestPacket(o)
+    {
+        //Note that lastHopLoc and lastHopName are not initialized yet.
+    }
+    GeoFloodInterestPacket(GeoFloodInterestPacket const & o):InterestPacket(o),
+        lastHopLoc(o.lastHopLoc)
+    {
+
+    }
+
+    GeoFloodInterestPacket& operator = (GeoFloodInterestPacket const & o)
+    {
+        InterestPacket::operator = (o);
+        lastHopLoc = o.lastHopLoc;
+        return *this;
+    }
+    virtual ~GeoFloodInterestPacket() {}
+
+    virtual void PrintPacket()
+    {
+        std::cout<<"===============GeoFloodInterest Packet============="<<std::endl;
+        InterestPacket::PrintPacket();
+        std::cout
+                <<"lastHop: "<<lastHopLoc.toString()<<std::endl;
+    }
+
+    virtual bool initialized()
+    {
+        if(lastHopLoc.IsEmpty()) return false;
+        else return ICNPacket::Initialized();
+    }
+} GeoFloodInterestPacket;
+
+typedef struct BfrInterestPacket:public InterestPacket
+{
+    GeoCoordinate lastHop;
+    GeoCoordinate nextDest;
+    freshnessIndexUnit freshness;
+    short nextDestLevel;
+
+    BfrInterestPacket():InterestPacket() {}
+    BfrInterestPacket(InterestPacket const & o):InterestPacket(o)
+    {
+        //Note that lastHop and nextDest are not initialized yet.
+    }
+    BfrInterestPacket(BfrInterestPacket const & o):InterestPacket(o),
+        lastHop(o.lastHop), nextDest(o.nextDest), freshness(o.freshness), nextDestLevel(o.nextDestLevel)
+    {
+    }
+    BfrInterestPacket& operator = (BfrInterestPacket const & o)
+    {
+        InterestPacket::operator = (o);
+        lastHop = o.lastHop;
+        nextDest = o.nextDest;
+        freshness = o.freshness;
+        nextDestLevel = o.nextDestLevel;
+        return *this;
+    }
+    virtual ~BfrInterestPacket() {}
+
+    virtual void PrintPacket()
+    {
+        std::cout<<"===============BfrGeoInterest Packet============="<<std::endl;
+        InterestPacket::PrintPacket();
+        std::cout
+                <<"lastHop: "<<lastHop.toString()<<std::endl
+                <<"nextDest: "<<nextDest.toString()<<std::endl
+                <<"freshness: "<<freshness<<std::endl
+                <<"nextDestLevel: "<<nextDestLevel<<std::endl;
+    }
+
+    virtual bool initialized()
+    {
+        if(lastHop.IsEmpty()) return false;
+        if(nextDest.IsEmpty()) return false;
+        return ICNPacket::Initialized();
+    }
+} BfrInterestPacket;
+
+typedef struct GeoRouteInterestPacket:public InterestPacket
+{
+    GeoCoordinate lastHopLoc;
+    GeoCoordinate DestLoc;
+    GeoCoordinate srcLoc;
+    unsigned destName;
+
+    GeoRouteInterestPacket():InterestPacket() {}
+    GeoRouteInterestPacket(InterestPacket const & o):InterestPacket(o)
+    {
+        //Note that all loc and node names are not initialized yet
+    }
+    GeoRouteInterestPacket(GeoRouteInterestPacket const & o):InterestPacket(o),
+        lastHopLoc(o.lastHopLoc), DestLoc(o.DestLoc), srcLoc(o.srcLoc)
+    {
+    }
+    GeoRouteInterestPacket& operator = (GeoRouteInterestPacket const & o)
+    {
+        InterestPacket::operator = (o);
+        lastHopLoc = o.lastHopLoc;
+        DestLoc = o.DestLoc;
+        srcLoc = o.srcLoc;
+
+        return *this;
+    }
+    virtual ~GeoRouteInterestPacket() {}
+
+    virtual void PrintPacket()
+    {
+        std::cout<<"===============GeoInterest Packet============="<<std::endl;
+        InterestPacket::PrintPacket();
+        std::cout
+                <<"lastHop: "<<lastHopLoc.toString()<<std::endl
+                <<"dest: "<<destName + 1<<" "<<DestLoc.toString()<<std::endl
+                <<"src: "<<srcLoc.toString()<<std::endl;
+    }
+
+    virtual bool initialized()
+    {
+        if(lastHopLoc.IsEmpty()) return false;
+        if(DestLoc.IsEmpty()) return false;
+        if(srcLoc.IsEmpty()) return false;
+        return ICNPacket::Initialized();
+    }
+} GeoRouteInterestPacket;
+
+//Active Interest Packet header format: ccnHdr | Active Int Header |
+typedef unsigned nodeId;
+typedef struct ActiveFloodInterestPacket:public InterestPacket
+{
+    nodeId nodename;
+    short nodeListLength;
+
+    ActiveFloodInterestPacket():InterestPacket() {}
+
+    ActiveFloodInterestPacket(InterestPacket const & o, nodeId nname, short length):
+        InterestPacket(o), nodename(nname), nodeListLength(length)
+    {}
+
+    ActiveFloodInterestPacket(ActiveFloodInterestPacket const & o):InterestPacket(o),
+        nodename(o.nodename), nodeListLength(o.nodeListLength)
+    {}
+
+    ActiveFloodInterestPacket& operator=(ActiveFloodInterestPacket const & o)
+    {
+        InterestPacket::operator=(o);
+        nodename = o.nodename;
+        nodeListLength = o.nodeListLength;
+    }
+
+    virtual ~ActiveFloodInterestPacket() {}
+
+    virtual void PrintPacket()
+    {
+        std::cout<<"===============Nc3nActiveInterst Header============="<<std::endl;
+        InterestPacket::PrintPacket();
+        std::cout
+                <<"nodename: "<<nodename+1<<std::endl
+                <<"node list length: "<<nodeListLength<<std::endl;
+    }
+} ActiveFloodInterestPacket;
 
 #endif

@@ -21,13 +21,42 @@
 #include "ican_common_packet.h"
 
 
-std::string pktTypeString[] = {"tyDtnRequest", "tyDtnCacheSummary", "tyFragment", "tyDtnRts", "tyDtnCts", "tyDtnAck", "tyDtnInterest"};
+std::string pktTypeString[] = {"tyInterest", "tyData", "tyNodeAdv", "tyPartitionAdv", "tyBfrGeoInterest", "tyGeoFloodInterest", "tyBeacon", "tyActiveInterest", "tyGeoData", "tyGeoInterest", "tyAck", "tyDtnRequest", "tyDtnCacheSummary", "tyFragment", "tyCoding", "tyDtnRts", "tyDtnCts", "tyDtnAck", "tyDtnInterest"};
 
 bool IsDtnPacket(packetType pType){
-    if(pType == tyDtnRequest || pType == tyDtnCacheSummary || pType == tyFragment || pType ==tyDtnRts || pType ==tyDtnCts|| pType == tyDtnAck || pType ==tyDtnInterest) 
+    if(pType == tyDtnRequest || pType == tyDtnCacheSummary || pType == tyFragment || pType ==tyDtnRts || pType ==tyDtnCts|| pType == tyDtnAck || pType ==tyDtnInterest ||pType == tyCoding) 
         return true;
     else return false;
 }
+
+bool IsIcnPacket(packetType pType){
+    if(IsIcnInterest(pType) || IsIcnData(pType) || pType == tyNodeAdv || pType == tyPartitionAdv)
+        return true;
+    else 
+        return false;
+}
+
+bool IsIcnInterest(packetType pType){ //should only include non-DTN packets
+    if(pType ==tyInterest || pType == tyBfrGeoInterest || pType == tyGeoInterest || pType == tyGeoFloodInterest || pType == tyActiveInterest )
+        return true;
+    else
+        return false;
+}
+
+bool IsIcnData(packetType pType){ //should only include non-DTN packets
+    if(pType == tyData || pType == tyGeoData)
+        return true;
+    else
+        return false;
+}
+
+bool IsAck(packetType pType){
+    if(pType == tyAck)
+        return true;
+    else
+        return false;
+}
+
 void PrintSendLog(Node* node, Message* const  msg){
     
     IcanHeader* ccnHeader = (IcanHeader*) MESSAGE_ReturnPacket(msg);            
@@ -35,7 +64,37 @@ void PrintSendLog(Node* node, Message* const  msg){
 
     std::cout<<GetTimeString(node)<<" "<<node->nodeIndex+1<<", ";
 
-   if(ptype==tyDtnRts){
+    if(IsIcnInterest(ptype)){
+        InterestPacket* pkt = (InterestPacket*) (ccnHeader+1);
+        std::cout<< pkt->srcName + 1
+            <<", 0, SEND, "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetNonce()
+            <<", "
+            <<pkt->GetName();
+    }
+
+    else if(IsIcnData(ptype)){
+        DataPacket* pkt = (DataPacket*) (ccnHeader+1);
+        std::cout<< pkt->srcName + 1
+            <<", 0, SEND, "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetNonce()
+            <<", "
+            <<pkt->GetName();
+    }
+
+    else if(IsAck(ptype)){
+        AckPacket* pkt = (AckPacket*) (ccnHeader+1);
+        std::cout<< "-1"
+            <<", 0, SEND, "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetNonce();
+    }
+    else if(ptype==tyDtnRts){
         DTNRTSPacket* pkt = (DTNRTSPacket*) (ccnHeader+1);
         std::cout<<pkt->srcName + 1
             <<", 0, SEND, "
@@ -62,7 +121,16 @@ void PrintSendLog(Node* node, Message* const  msg){
             <<pkt->GetName();
     }
 
-      
+    else if(ptype==tyCoding){
+        NetworkCodingPacket* pkt = (NetworkCodingPacket*) (ccnHeader+1);
+        std::cout<<pkt->srcName + 1
+            <<", 0, SEND, "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetName();
+    }
+
+    
     else if(ptype==tyFragment){
         FragmentationPacket* pkt = (FragmentationPacket*) (ccnHeader+1);
         std::cout<<pkt->srcName + 1
@@ -93,7 +161,38 @@ void PrintRecvLog(Node* node, Message* const  msg){
 
     std::cout<<GetTimeString(node)<<" "<<node->nodeIndex+1<<", ";
 
-   if(ptype==tyDtnRts){
+    if(IsIcnInterest(ptype)){
+        InterestPacket* pkt = (InterestPacket*) (ccnHeader+1);
+        std::cout<< pkt->srcName + 1
+            <<", 0, RECV,  "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetNonce()
+            <<", "
+            <<pkt->GetName();
+    }
+
+    else if(IsIcnData(ptype)){
+        DataPacket* pkt = (DataPacket*) (ccnHeader+1);
+        std::cout<< pkt->srcName + 1
+            <<", 0, RECV, "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetNonce()
+            <<", "
+            <<pkt->GetName();
+    }
+
+    else if(IsAck(ptype)){
+        AckPacket* pkt = (AckPacket*) (ccnHeader+1);
+        std::cout<< "-1"
+            <<", 0, RECV, "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetNonce();
+    }
+
+    else if(ptype==tyDtnRts){
         DTNRTSPacket* pkt = (DTNRTSPacket*) (ccnHeader+1);
         std::cout<<pkt->srcName + 1
             <<", 0, RECV, "
@@ -120,7 +219,15 @@ void PrintRecvLog(Node* node, Message* const  msg){
             <<pkt->GetName();
     }
 
-   else if(ptype==tyFragment){
+    else if(ptype==tyCoding){
+        NetworkCodingPacket* pkt = (NetworkCodingPacket*) (ccnHeader+1);
+        std::cout<<pkt->srcName + 1
+            <<", 0, RECV, "
+            <<pktTypeString[ptype]
+            <<", "
+            <<pkt->GetName();
+    }
+    else if(ptype==tyFragment){
         FragmentationPacket* pkt = (FragmentationPacket*) (ccnHeader+1);
         std::cout<<pkt->srcName + 1
             <<", 0, RECV, "

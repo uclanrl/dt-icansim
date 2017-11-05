@@ -23,29 +23,39 @@
 #include "ican_common.h"
 #include "ican_dtn_common.h"
 
-enum DtnObjectType{unknown, interest, fragment};
+enum DtnObjectType{unknown, interest, fragment, ncblock};
 
 typedef struct ObjectMetadata{
         DtnObjectType objectType;
         unsigned interestNodeIndex;
         Fragmentation_t* fragmentMetadata;
+	NetworkCoding_t* ncblockMetadata;		
 
         virtual ~ObjectMetadata(){
             if(fragmentMetadata){
                 delete fragmentMetadata;
                 fragmentMetadata = NULL;
             }
-       }
+	    if(ncblockMetadata){
+		delete ncblockMetadata;
+		ncblockMetadata = NULL;
+	    }			
+        }
         
-        ObjectMetadata():objectType(unknown), fragmentMetadata(NULL), interestNodeIndex(999999){}
+        ObjectMetadata():objectType(unknown), fragmentMetadata(NULL), interestNodeIndex(999999), ncblockMetadata(NULL){}
 
 	//interest
     	ObjectMetadata(DtnObjectType objectType_, unsigned nodeIndex_):objectType(objectType_), fragmentMetadata(NULL), 
-    		interestNodeIndex(nodeIndex_){}
+    		interestNodeIndex(nodeIndex_), ncblockMetadata(NULL){}
 
 	//frag
-	ObjectMetadata(DtnObjectType objectType_, Fragmentation_t fragmentMetadata_):objectType(objectType_), interestNodeIndex(99999){
+	ObjectMetadata(DtnObjectType objectType_, Fragmentation_t fragmentMetadata_):objectType(objectType_), interestNodeIndex(99999), ncblockMetadata(NULL){
 	            fragmentMetadata = new Fragmentation_t(fragmentMetadata_);        
+        }
+
+	//ncblock
+	ObjectMetadata(DtnObjectType objectType_, NetworkCoding_t ncblockMetadata_):objectType(objectType_), interestNodeIndex(99999), fragmentMetadata(NULL){
+  		    ncblockMetadata = new NetworkCoding_t(ncblockMetadata_);
         }
 
         ObjectMetadata(ObjectMetadata const & o):objectType(o.objectType), interestNodeIndex(o.interestNodeIndex){
@@ -53,7 +63,11 @@ typedef struct ObjectMetadata{
                     fragmentMetadata = new Fragmentation_t(*o.fragmentMetadata);
 		else
 	            fragmentMetadata = NULL;
-       }
+		if(o.ncblockMetadata!=NULL)
+                    ncblockMetadata = new NetworkCoding_t(*o.ncblockMetadata);
+		else
+	            ncblockMetadata = NULL;
+        }
 
 	virtual ObjectMetadata& operator=(ObjectMetadata const& o) {
                 objectType = o.objectType;
@@ -62,7 +76,12 @@ typedef struct ObjectMetadata{
 		else
 	        	fragmentMetadata = NULL;
 
-               interestNodeIndex = o.interestNodeIndex;
+		if(o.ncblockMetadata)
+                    ncblockMetadata = new NetworkCoding_t(*o.ncblockMetadata);
+		else
+	            ncblockMetadata = NULL;
+		
+                interestNodeIndex = o.interestNodeIndex;
 		return *this;
 	}
        
@@ -74,11 +93,30 @@ typedef struct ObjectMetadata{
             		if(this->fragmentMetadata->objectEqual(*n.fragmentMetadata))
             			return true;
             	}
-			}
-           return false;
+
+		if(this->ncblockMetadata && n.ncblockMetadata){
+			if(this->ncblockMetadata->objectEqual(*n.ncblockMetadata))
+				return true;
+		}
+            }
+            return false;
         }
 
-       bool IsEmpty(){
+/*	
+        //TODO define this and change the objectqueue to std::set<ObjectMetadata> for scheduling...
+        bool operator<( const BfrQueryResult & n ) const {
+		if(this->level < n.level)
+			return true;
+		else if(this->level == n.level){
+                        if(this->freshness - n.freshness < 0)
+                            return true;
+                        else	if(this->location < n.location)
+				return true;
+		}
+		return false;	
+ 	}
+*/
+        bool IsEmpty(){
             if(objectType==unknown) return true;
             return false;
         }
@@ -94,7 +132,12 @@ typedef struct ObjectMetadata{
                 std::cout<<", objectName: "<<fragmentMetadata->getName()<<std::endl;                
                 break;
             }                
-	            }
+	    case ncblock:{
+		std:cout<<", objectName: "<<ncblockMetadata->getName()<<std::endl;
+		break;
+		}						
+
+            }
             std::cout<<std::endl;
         }        
 }ObjectMetadata;
@@ -109,6 +152,8 @@ public:
 
     void InsertInterestDataObjectToQueue(unsigned nodeIndex);
     void InsertFragmentToQueue(Fragmentation_t frag);
+    void InsertNcblockToQueue(NetworkCoding_t block);
+	
     bool EventHandler(Message* msg);
     
     void TakeNextObject();     

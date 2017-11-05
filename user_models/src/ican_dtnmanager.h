@@ -25,14 +25,16 @@
 #include "ican_dtn_cachesummarygenerator.h"
 #include "ican_dtn_interestmanager.h"
 #include "fragmentation.h"
+#include "networkcoding.h"
 #include "ican_dtn_common.h"
 #include "ican_dtn_objectqueue.h"
 #include "fragmentationpacketutil.h"
 #include "ican_dtn_requestmanager.h"
 #include "ican_dtn_requestgenerator.h"
 #include "ican_dtn_cachesummarystore.h"
+#include "networkcodingpacketutil.h"
 
-#define DTNINTERESTMATCHINGDELAY 30*MILLI_SECOND 
+#define DTNINTERESTMATCHINGDELAY 30*MILLI_SECOND //TODO: test this parameter
 #define BLOCKUNIT 1024 //in bytes
 
 enum bufferedObjectType{bot_unknown, bot_fragmentation, bot_ncblock};
@@ -40,6 +42,7 @@ enum bufferedObjectType{bot_unknown, bot_fragmentation, bot_ncblock};
 typedef struct ObjectBufferEntry{//convenience struct for buffered objects to ease the 3-way handshake work
     bufferedObjectType objType;
     Fragmentation_t fragmentMetadata;
+    NetworkCoding_t ncblockMetadata;	
     int numRetry;
 
     ObjectBufferEntry():objType(bot_unknown), numRetry(0)
@@ -50,11 +53,17 @@ typedef struct ObjectBufferEntry{//convenience struct for buffered objects to ea
         
     }
 
-    ObjectBufferEntry(ObjectBufferEntry const&  o):objType(o.objType), fragmentMetadata(o.fragmentMetadata){
+    ObjectBufferEntry(NetworkCoding_t ncblock_):objType(bot_ncblock), ncblockMetadata(ncblock_), numRetry(0)
+    {
+        
+    }	
+
+    ObjectBufferEntry(ObjectBufferEntry const&  o):objType(o.objType), fragmentMetadata(o.fragmentMetadata), ncblockMetadata(o.ncblockMetadata){
     }
     virtual ObjectBufferEntry& operator=(ObjectBufferEntry const& o) {
         objType = o.objType;
         fragmentMetadata = o.fragmentMetadata;
+	ncblockMetadata = o.ncblockMetadata;		
         return *this;
     }
 
@@ -74,7 +83,9 @@ typedef struct ObjectBufferEntry{//convenience struct for buffered objects to ea
         <<"objType: "<<objType<<std::endl;
 	if(objType == bot_fragmentation)		
 	        fragmentMetadata.Print();
-       std::cout<<std::endl;
+	if(objType == bot_ncblock)
+		ncblockMetadata.Print();		
+        std::cout<<std::endl;
     }
                 
 } ObjectBufferEntry;
@@ -116,7 +127,9 @@ struct IcanDtnStat
     unsigned totalAckBytesOut;
     unsigned totalFragIn;
     unsigned totalFragBytesIn;
-   
+    unsigned totalNcIn;
+    unsigned totalNcBytesIn;	
+    
 };
 
 class CIcanDtnManager{
@@ -149,10 +162,12 @@ private:
     CDtnRequestManager* m_pDataRequestManager;
     CDtnRequestGenerator* m_pDataRequestGenerator;
 
+    //BloomFilterStore* m_pCacheSummaryStore;
     CDtnCacheSummaryStore* m_pCacheSummaryStore;
         
     //add hooks here
     //e.g.
+    NetworkCoding* m_networkcoding;
     FragmentationManager* m_fragmentation;
 
     clocktype m_InterestInterval;
@@ -167,6 +182,8 @@ private:
     CDtnObjectQueue* m_objectQueue;
 
     fragmentationpacketutil* m_fragmentPacketUtil;
+    networkcodingpacketutil* m_ncPacketUtil;
+
     HandshakeObjectBuffer* m_pHandshakeObjBuffer;
     HandshakeWaitingState* m_pHandshakeDataWaitingState;
     HandshakeWaitingState* m_pHandshakeAckWaitingState;
@@ -182,13 +199,23 @@ private:
     CIcanDtnManager(){}
     void RequestMatching(unsigned nodeIndex);
     void RetrieveNextFragment(std::string fragName, unsigned targetNodeIndex);
-   void SendNeighborInterestPacket(unsigned neighborNodeIndex);
+    void RetrieveNextNCBlock(std::string fragName, unsigned targetNodeIndex);
+    void SendNeighborInterestPacket(unsigned neighborNodeIndex);
     void RequestMatchingByObject(unsigned nodeIndex, std::string objName);
     void NotifySubscriber(std::string objName, size_t objSize);
     size_t GetFileSizeByObjectName(std::string fullName);
 	
-
+    //TODO
+    /* 
+     NeighborList* //NOTE: this should be shared with NDN
+    */    
 };
+
+ /*   TODO        
+    General Data structure (should be shared with NDN):
+            Neighbor table
+    }
+    */   
 
 
 #endif
