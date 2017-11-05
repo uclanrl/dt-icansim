@@ -17,7 +17,17 @@ $(USER_MODELS_DIR)/ican_dtn_requestmanager.cpp \
 $(USER_MODELS_DIR)/ican_dtn_requestgenerator.cpp \
 $(USER_MODELS_DIR)/ican_dtn_cachesummarystore.cpp \
 $(USER_MODELS_DIR)/icansim.cpp \
-$(USER_MODELS_DIR)/ican_common.cpp
+$(USER_MODELS_DIR)/ican_common.cpp \
+$(USER_MODELS_DIR)/networkcodingpacketutil.cpp \
+$(USER_MODELS_DIR)/networkcoding.cpp \
+$(USER_MODELS_DIR)/ican_dtn_objectqueue.cpp \
+$(USER_MODELS_DIR)/coding/codetorrent.cpp \
+$(USER_MODELS_DIR)/coding/codetorrentencoder.cpp  \
+$(USER_MODELS_DIR)/coding/galois.cpp  \
+$(USER_MODELS_DIR)/coding/codetorrentdecoder.cpp  \
+$(USER_MODELS_DIR)/coding/CodeTorrentUtility.cpp  \
+$(USER_MODELS_DIR)/coding/nc.cpp \
+$(USER_MODELS_DIR)/coding/ncutil.cpp 
 
 
 USER_MODELS_INCLUDES = \
