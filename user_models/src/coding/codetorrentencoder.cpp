@@ -7,7 +7,6 @@
  */
 
 #include "codetorrentencoder.h"
-#include "Trace.h"
 
 codetorrentencoder::codetorrentencoder(const char* _file,size_t _blockSize, long fileSize) {
     double doubleFileSize = static_cast<double>(fileSize);

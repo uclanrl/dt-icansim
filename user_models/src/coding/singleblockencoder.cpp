@@ -12,7 +12,6 @@
 #include <sys/timeb.h>
 #include <sys/time.h>
 
-#include <Trace.h>
 
 BlockPtr SingleBlockEncoder::AllocBlock(int in_block_size) {
 

@@ -7,16 +7,16 @@
 #ifndef NETWORKCODINGFILEUTILITY_H_
 #define NETWORKCODINGFILEUTILITY_H_
 
-#include <libcpphaggle/String.h>
+#include <string>
 
 class NetworkCodingFileUtility {
 public:
     NetworkCodingFileUtility();
     virtual ~NetworkCodingFileUtility();
 
-    string createNetworkCodedBlockFileName(string originalFileName);
-    string createDecodedBlockFileName(const char*networkCodedFileName);
-    string createDecodedBlockFilePath(const char* decodedFileName,const char* storagePath);
+    std::string createNetworkCodedBlockFileName(std::string originalFileName);
+    std::string createDecodedBlockFileName(const char*networkCodedFileName);
+    std::string createDecodedBlockFilePath(const char* decodedFileName,const char* storagePath);
 };
 
 #endif /* NETWORKCODINGFILEUTILITY_H_ */

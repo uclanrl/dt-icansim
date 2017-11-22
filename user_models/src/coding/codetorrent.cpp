@@ -25,7 +25,6 @@
 #include <sys/time.h>
 //#include <time.h>
 
-#include <Trace.h>
 
 struct timeval ct_tv_beg, ct_tv_end;
 struct timeval ct_encode_beg, ct_encode_end;
@@ -62,17 +61,17 @@ long CT_GetTimeDifference(struct timeval tv_beg, struct timeval tv_end) {
  }
  */
 CodeTorrent::~CodeTorrent() {
-    HAGGLE_DBG2("Calling codetorrent destructor\n");
+    printf("Calling codetorrent destructor\n");
 	CleanMGData();
 
 	if (identity == CT_SERVER) {
-	    HAGGLE_DBG2("Cleaning up server\n");
+	    printf("Cleaning up server\n");
 	    CleanData();
 	}
 
 
 	if (identity == CT_CLIENT) {
-	    HAGGLE_DBG2("Cleaning up client\n");
+	    printf("Cleaning up client\n");
 		CleanMHelpful();
 		CleanBuffer();
         delete[] rank_vec;
@@ -432,11 +431,11 @@ void CodeTorrent::LoadFile(int gen) {
 
 	//printf("loading filename=%s\n",filename);
 	if (!(fp = fopen(filename, "rb"))) {
-		HAGGLE_ERR("CODETORRENT ERROR: cannot open %s\n", filename);
+		printf("CODETORRENT ERROR: cannot open %s\n", filename);
 		return; // MOS - need error handling
 	}
 
-	if(fp) HAGGLE_DBG2("Opening file %s for writing with file descriptor %d\n", filename, fileno(fp));
+	if(fp) printf("Opening file %s for writing with file descriptor %d\n", filename, fileno(fp));
 
 	int i, j;
 	int n_items = 0;
@@ -465,12 +464,12 @@ void CodeTorrent::LoadFile(int gen) {
 
 	} else if (temp != gen_size) {
 
-	        HAGGLE_ERR("temp %d gen_size %d\n",temp,gen_size);
+	        printf("temp %d gen_size %d\n",temp,gen_size);
 
 #ifdef WIN32
-		HAGGLE_ERR("%s: fread(2) \n", strerror(errno));
+		printf("%s: fread(2) \n", strerror(errno));
 #else
-		HAGGLE_ERR("CODETORRENT ERROR: unexpected codetorrent read result\n");
+		printf("CODETORRENT ERROR: unexpected codetorrent read result\n");
 #endif
 		//printf("Press <enter>...");
 		//getchar();
@@ -592,14 +591,14 @@ unsigned char CodeTorrent::NthSymbol(unsigned char *in_buf, int fsize, int at) {
  */
 
 bool CodeTorrent::WriteFile(int gen) {
-    HAGGLE_DBG2("Writing received data to file %s\n",out_filename);
+    printf("Writing received data to file %s\n",out_filename);
 	fp_write = fopen(out_filename, "wb");
 	if(fp_write == NULL) {
-	  HAGGLE_ERR("Cannot create file %s for decoded data\n",out_filename);
+	  printf("Cannot create file %s for decoded data\n",out_filename);
 	  return false;
 	}
 
-    if(fp_write) HAGGLE_DBG2("Opening file %s for writing with file descriptor %d\n", out_filename, fileno(fp_write));
+    if(fp_write) printf("Opening file %s for writing with file descriptor %d\n", out_filename, fileno(fp_write));
 
 	//fseek(fp_write, 1, SEEK_END);
 
@@ -621,14 +620,14 @@ bool CodeTorrent::WriteFile(int gen) {
 
 			int written = fwrite(m_gdata[j], 1, last_block_size, fp_write);
 			if(written != last_block_size) {
-			  HAGGLE_ERR("Error-1 writing decoded data to file %s\n",out_filename); // MOS
+			  printf("Error-1 writing decoded data to file %s\n",out_filename); // MOS
 			  fclose(fp_write);
 			  return false;
 			}
 		} else {
 			int written = fwrite(m_gdata[j], 1, block_size, fp_write);
 			if(written != block_size) {
-			  HAGGLE_ERR("Error-2 writing decoded data to file %s\n",out_filename); // MOS
+			  printf("Error-2 writing decoded data to file %s\n",out_filename); // MOS
 			  fclose(fp_write);
 			  return false;
 			}
@@ -822,7 +821,7 @@ bool CodeTorrent::StoreBlock(CodedBlockPtr in) {
 	int gen = in->gen;
 
 	if (nc->IsHelpful(rank_vec, m_helpful, in)) {
-		HAGGLE_DBG2("Block is helpful\n");
+		printf("Block is helpful\n");
 		buf.push_back(CopyCodedBlock(in));
 		rank_vec[gen]++; // if helpful, raise the rank
 		rank_vec_in_buf[gen]++;
@@ -832,7 +831,7 @@ bool CodeTorrent::StoreBlock(CodedBlockPtr in) {
 		}
 
 	} else {
-	    HAGGLE_DBG("Block is not helpful\n");
+	    printf("Block is not helpful\n");
 		return false; // if not helpful, return false
 	}
 
@@ -852,7 +851,7 @@ bool CodeTorrent::Decode() {
 	//struct timeval start_dec, end_dec;
 
 	if (identity != CT_CLIENT) {// if I'm a server, why do it?
-	    HAGGLE_ERR("Server is trying to decode\n");
+	    printf("Server is trying to decode\n");
 		return false;
 	}
 
@@ -861,7 +860,7 @@ bool CodeTorrent::Decode() {
 
 	if (GetGenCompleted() != GetNumGens()) { // make sure all generations are in!
 
-	    HAGGLE_DBG("The file is not complete, decoding failed - GenCompleted=%d NumGens=%d\n",GetGenCompleted(),GetNumGens());
+	    printf("The file is not complete, decoding failed - GenCompleted=%d NumGens=%d\n",GetGenCompleted(),GetNumGens());
 		//fprintf(stderr, "The file download is not complete, decoding failed.\n");
 
 		return false;
@@ -874,7 +873,7 @@ bool CodeTorrent::Decode() {
 
 		//printf("%d  :  ", i);
 	        if(!DecodeGen(i)) {
-		  HAGGLE_ERR("Decoding failure\n"); // MOS
+		  printf("Decoding failure\n"); // MOS
 		  return false;
 	        }
 	}
@@ -895,7 +894,7 @@ bool CodeTorrent::Decode() {
 }
 
 bool CodeTorrent::DecodeGen(int gen) {
-    HAGGLE_DBG2("Performing decoding\n");
+    printf("Performing decoding\n");
 	int j;
 
 	// allocate m_data
@@ -918,13 +917,13 @@ bool CodeTorrent::DecodeGen(int gen) {
 
 	bool isDecode = nc->Decode(tempBuf, m_gdata, gen);
 	if(!isDecode) {
-	    HAGGLE_ERR("Decoding not complete\n");
+	    printf("Decoding not complete\n");
 		return false;
 	}
 
 	// when done decoding, write it into a file
 	if(!WriteFile(gen)) {
-	    HAGGLE_ERR("Error writing decoded data to file\n"); // MOS
+	    printf("Error writing decoded data to file\n"); // MOS
 	    return false;
 	}
 
@@ -967,13 +966,13 @@ void CodeTorrent::PushGenBuf(CodedBlockPtr in) {
 	filename_write[fname_len + ext_len + ext2_len] = '\0';
 
 	fp_write = fopen(filename_write, "ab"); // append to the file
-	if(fp_write) HAGGLE_DBG2("Opening file %s for writing with file descriptor %d\n", filename_write, fileno(fp_write));
+	if(fp_write) printf("Opening file %s for writing with file descriptor %d\n", filename_write, fileno(fp_write));
 											// TODO: error checking?
 	int cf = fwrite(in->coeffs, 1, num_blocks_gen[gen], fp_write); // write the coeffs first
 	int sm = fwrite(in->sums, 1, block_size, fp_write); // write actual coded block
 
 	if (cf != num_blocks_gen[gen] || sm != block_size) {
-		HAGGLE_ERR("cache writing error!\n");
+		printf("cache writing error!\n");
 	}
 
 	delete[] ext2;
@@ -1019,21 +1018,21 @@ CodedBlockPtr CodeTorrent::ReadGenBuf(int gen, int k) {
 	filename_read[fname_len + ext_len + ext2_len] = '\0';
 
 	fp = fopen(filename_read, "rb");
-	if(fp) HAGGLE_DBG2("Opening file %s for writing with file descriptor %d\n", filename_read, fileno(fp));
+	if(fp) printf("Opening file %s for writing with file descriptor %d\n", filename_read, fileno(fp));
 
 	if (!fp) {
-		HAGGLE_ERR("CODETORRENT ERROR: cache access error!\n");
+		printf("CODETORRENT ERROR: cache access error!\n");
 	}
 
 	if (fseek(fp, (num_blocks_gen[gen] + block_size) * k, SEEK_SET)) {
-		HAGGLE_ERR("CODETORRENT ERROR: cache access error!\n");
+		printf("CODETORRENT ERROR: cache access error!\n");
 	}
 
 	int cf = fread(tempBlock->coeffs, 1, num_blocks_gen[gen], fp);
 	int sm = fread(tempBlock->sums, 1, block_size, fp);
 
 	if (cf != num_blocks_gen[gen] || sm != block_size) {
-		HAGGLE_ERR("CODETORRENT ERROR: cache reading error!\n");
+		printf("CODETORRENT ERROR: cache reading error!\n");
 	}
 
 	fclose(fp);
@@ -1086,28 +1085,28 @@ void CodeTorrent::FlushBuf() {
 void CodeTorrent::PrintBlocks(int gen) {
 	int j, k;
 
-	HAGGLE_DBG("===== Original Data ====\n");
+	printf("===== Original Data ====\n");
 
 	for (j = 0; j < num_blocks_gen[gen]; j++) {
 
-		HAGGLE_DBG("[Gen#%2u Blk#%3u] ", gen, j); // gen ID and block ID.
+		printf("[Gen#%2u Blk#%3u] ", gen, j); // gen ID and block ID.
 
 		for (k = 0; k < ((is_sim ? 1 : block_size) > PRINT_BLK ? PRINT_BLK : (is_sim ? 1 : block_size)); k++) {
-			HAGGLE_DBG("%x ", data[j][k]); // j-th block, k-th character
+			printf("%x ", data[j][k]); // j-th block, k-th character
 		}
 
 		if ((is_sim ? 1 : block_size) > PRINT_BLK * 2) {
-			HAGGLE_DBG(" ... ");
+			printf(" ... ");
 		}
 
 		for (k = (is_sim ? 1 : block_size) - PRINT_BLK; k < (is_sim ? 1 : block_size); k++) {
-			HAGGLE_DBG("%x ", data[j][k]);
+			printf("%x ", data[j][k]);
 		}
 
-		HAGGLE_DBG("\n");
+		printf("\n");
 
 	}
-	HAGGLE_DBG("=======================\n");
+	printf("=======================\n");
 
 }
 
@@ -1160,17 +1159,17 @@ void CodeTorrent::PrintDecoded() {
 
 void CodeTorrent::PrintFileInfo() {
 
-	HAGGLE_DBG(" ========= File Info =========\n");
+	printf(" ========= File Info =========\n");
 	if (identity == CT_SERVER)
-		HAGGLE_DBG(" SERVER\n");
+		printf(" SERVER\n");
 	else
-		HAGGLE_DBG(" CLIENT\n");
-	HAGGLE_DBG(" File name: %s\n", GetFileName());
-	HAGGLE_DBG(" File Size: %d\n", GetFileSize());
-	HAGGLE_DBG(" Number Generations: %d\n", GetNumGens());
-	HAGGLE_DBG(" Block Size: %d\n", GetBlockSize());
-	HAGGLE_DBG(" Num Blocks: %d\n", GetNumBlocks());
-	//HAGGLE_DBG(" Num Blocks per Gen: %d\n", GetNumBlocksGen());
-	HAGGLE_DBG(" Field Size: %d bits\n", GetFieldSize());
-	HAGGLE_DBG(" ============================\n");
+		printf(" CLIENT\n");
+	printf(" File name: %s\n", GetFileName());
+	printf(" File Size: %d\n", GetFileSize());
+	printf(" Number Generations: %d\n", GetNumGens());
+	printf(" Block Size: %d\n", GetBlockSize());
+	printf(" Num Blocks: %d\n", GetNumBlocks());
+	//printf(" Num Blocks per Gen: %d\n", GetNumBlocksGen());
+	printf(" Field Size: %d bits\n", GetFieldSize());
+	printf(" ============================\n");
 }

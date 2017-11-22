@@ -7,7 +7,7 @@
 #ifndef CODETORRENTDECODER_H_
 #define CODETORRENTDECODER_H_
 
-#include <libcpphaggle/String.h>
+#include <string>
 #include "codetorrent.h"
 #include "NetworkCodingConstants.h"
 
@@ -28,13 +28,13 @@ public:
 
 	int getNumberOfBlocksPerGen();
 
-    const string& getFilepath() const {
+    const std::string& getFilepath() const {
         return filepath;
     }
 
 private:
 	CodeTorrent* codetorrent;
-	string filepath;
+	std::string filepath;
 };
 
 #endif /* CODETORRENTDECODER_H_ */

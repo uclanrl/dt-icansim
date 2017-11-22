@@ -6,7 +6,6 @@
  */
 
 #include "codetorrentdecoder.h"
-#include <Trace.h>
 
 codetorrentdecoder::codetorrentdecoder(size_t fileSize, const char* outputFile,size_t _blockSize) {
 
@@ -17,7 +16,7 @@ codetorrentdecoder::codetorrentdecoder(size_t fileSize, const char* outputFile,s
     double doubleBlockSize = static_cast<double>(blockSize);
     double doubleNumBlocksPerGen = ceil(doubleFileSize / doubleBlockSize);
     int numBlocksPerGen = static_cast<int>(doubleNumBlocksPerGen);
-    HAGGLE_DBG2("doubleFileSize=%f numblockspergen=%d\n", doubleFileSize, numBlocksPerGen);
+    printf("doubleFileSize=%f numblockspergen=%d\n", doubleFileSize, numBlocksPerGen);
     if (numBlocksPerGen == 0) {
         numBlocksPerGen = 1;
     }
@@ -27,7 +26,7 @@ codetorrentdecoder::codetorrentdecoder(size_t fileSize, const char* outputFile,s
 }
 
 codetorrentdecoder::codetorrentdecoder(CodeTorrent* codetorrent) {
-    HAGGLE_DBG2("calling copy constructor\n");
+    printf("calling copy constructor\n");
     this->codetorrent = codetorrent;
 }
 
@@ -61,7 +60,7 @@ bool codetorrentdecoder::store_block(int gen, CoeffsPtr coeffs, BlockPtr sums) {
 }
 
 bool codetorrentdecoder::decode() {
-    HAGGLE_DBG2("calling decode identity=%d\n",this->codetorrent->GetIdentity());
+    printf("calling decode identity=%d\n",this->codetorrent->GetIdentity());
     return this->codetorrent->Decode();
 }
 
